@@ -1,4 +1,9 @@
-# workers-graphql-server
+# GraphQL Service and Gateway Schema with Cloud workers
+
+This is a fork of the Cloudflare [worker-graphql-server](https://github.com/signalnerve/workers-graphql-server).
+You can find a blog article explaning this experiment [Bloomreach developers Blog](https://developers.bloomreach.com/blog/2021/graphql-service-and-gateway-schema-with-cloudflare-workers.html)
+
+# Readme.md from Cloudflare worker-graphql-server
 
 An [Apollo GraphQL](https://www.apollographql.com/) server, built with [Cloudflare Workers](https://workers.cloudflare.com). [Try a demo by looking at a deployed GraphQL playground](https://graphql-on-workers.signalnerve.com/___graphql).
 

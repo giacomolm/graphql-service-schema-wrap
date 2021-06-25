@@ -1,29 +1,35 @@
+const { print } = require('graphql');
+const { introspectSchema, wrapSchema } = require('@graphql-tools/wrap');
 const { ApolloServer } = require('apollo-server-cloudflare')
 const { graphqlCloudflare } = require('apollo-server-cloudflare/dist/cloudflareApollo')
 
-const KVCache = require('../kv-cache')
-const PokemonAPI = require('../datasources/pokeapi')
-const resolvers = require('../resolvers')
-const typeDefs = require('../schema')
+const executor = async ({ document, variables }) => {
+  const query = print(document);
+  const fetchResult = await fetch('https://graphql.eng-demo.bloomreach.io/graphql', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'connector': 'brsm',
+    },
+    body: JSON.stringify({ query, variables }),
+  });
+  return fetchResult.json();
+};
 
-const dataSources = () => ({
-  pokemonAPI: new PokemonAPI(),
-})
+const createServer = async (graphQLOptions) => {
+  const schema = wrapSchema({
+    schema: await introspectSchema(executor),
+    executor,
+  });
+  return new ApolloServer({ schema });
+}
 
-const kvCache = { cache: new KVCache() }
-
-const createServer = graphQLOptions =>
-  new ApolloServer({
-    typeDefs,
-    resolvers,
-    introspection: true,
-    dataSources,
-    playground: true,
-    ...(graphQLOptions.kvCache ? kvCache : {}),
-  })
-
-const handler = (request, graphQLOptions) => {
-  const server = createServer(graphQLOptions)
+let server = undefined;
+const handler = async (request, graphQLOptions) => {
+  //lazy init
+  if (server === undefined) {
+    server =  await createServer(graphQLOptions);
+  }
   return graphqlCloudflare(() => server.createGraphQLServerOptions(request))(request)
 }
 
