@@ -1,10 +1,11 @@
+const graphqlService = require("@bloomreach/graphql-commerce-connector-service");
 const { print } = require('graphql');
+const { ApolloServer } = require('apollo-server');
 const jose = require('node-jose');
-const { makeExecutableSchema } = require('@graphql-tools/schema');
 const { introspectSchema, wrapSchema } = require('@graphql-tools/wrap');
 const { mergeSchemas } = require('@graphql-tools/merge');
-const { ApolloServer } = require('apollo-server-cloudflare')
-const { graphqlCloudflare } = require('apollo-server-cloudflare/dist/cloudflareApollo');
+const { makeExecutableSchema } = require('@graphql-tools/schema');
+const fetch = require("node-fetch");
 
 const keystore = {"keys": [{"alg": "A256GCM","k": "...","kid": "...","kty": "oct"}]};
 
@@ -37,25 +38,25 @@ const gsExecutor = async ({ document, variables, context }) => {
   return fetchResult.json();
 };
 
-const createServer = async (request) => {
-  const { authorization, connector } = Object.fromEntries(request.headers);
-  const context = { authorization, connector };
-  const remoteSchema = wrapSchema({
-    schema: await introspectSchema(gsExecutor, context),
-    executor: gsExecutor,
-  });
-
-  const encryptedAccessData = authorization.substring('Bearer '.length);
+const getAccessData = async(authorization) => {
+  const encryptedAccessData = authorization?.substring('Bearer '.length);
   let accessData;
   if (encryptedAccessData) {
     try {
       const jwk = await jose.JWK.asKeyStore(keystore);
       const { payload } = await jose.JWE.createDecrypt(jwk).decrypt(encryptedAccessData);
-      accessData = JSON.parse(payload.toString());
+      return JSON.parse(payload.toString());
     } catch (e) {
       throw new Error(`Invalid authorization: ${e}`);
     }
   }
+}
+
+const createServer = async (request) => {
+  const remoteSchema = wrapSchema({
+    schema: await introspectSchema(gsExecutor),
+    executor: gsExecutor,
+  });
 
   const typeDefs = `
     type CustomPayment {
@@ -77,7 +78,8 @@ const createServer = async (request) => {
 
   const resolvers = {
     Query: {
-      payments: async () => {
+      payments: async (parent, args, context) => {
+        const accessData = await getAccessData(context.authorization);
         const headers =  {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${accessData.accessToken.access_token}`,
@@ -92,7 +94,8 @@ const createServer = async (request) => {
     },
 
     Mutation: {
-      makePayment: async (paymentInput) => {
+      makePayment: async (parent, args, context) => {
+        const accessData = await getAccessData(context.authorization);
         const headers =  {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${accessData.accessToken.access_token}`,
@@ -123,13 +126,21 @@ const createServer = async (request) => {
     schemas: [remoteSchema, paymentSchema]
   });
 
-  return new ApolloServer({ schema: mergedSchema, context });
+  return new ApolloServer({
+    schema: mergedSchema,
+    context: ({ req }) => ({
+      authorization: req.headers.authorization,
+      connector: req.headers.connector
+    }) 
+  });
 }
 
-const handler = async (request) => {
-  const server =  await createServer(request);
-
-  return graphqlCloudflare(() => server.createGraphQLServerOptions(request))(request)
+async function startApolloServer() {
+  const server = await createServer();
+  // The `listen` method launches a web server.
+  server.listen({ port: 4100 }).then(({ url }) => {
+    console.log(`🚀  Server ready at ${url}`);
+  });
 }
 
-module.exports = handler
+startApolloServer();
